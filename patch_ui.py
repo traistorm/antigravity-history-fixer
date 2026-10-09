@@ -29,6 +29,38 @@ def clean_title(raw_text):
         title = title[:62] + "..."
     return title
 
+def recover_crashed_conversations(convos_dir):
+    """
+    Quét và tự động cứu hộ các database bị crash hoặc ngắt đột ngột:
+    - Thu dọn và merge các file SQLite WAL (.db-wal) dở dang về file chính.
+    - Chuyển trạng thái các bước bị treo status=2 (RUNNING) về status=3 (DONE).
+    """
+    db_files = list(convos_dir.glob("*.db"))
+    recovered_wal = 0
+    fixed_steps = 0
+    for db_path in db_files:
+        wal_path = db_path.with_name(db_path.name + "-wal")
+        has_wal = wal_path.exists()
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            if has_wal:
+                cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                recovered_wal += 1
+            # Check for stuck steps
+            cur.execute("SELECT COUNT(*) FROM steps WHERE status=2")
+            stuck_count = cur.fetchone()[0] or 0
+            if stuck_count > 0:
+                cur.execute("UPDATE steps SET status=3 WHERE status=2")
+                conn.commit()
+                cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                fixed_steps += stuck_count
+            conn.close()
+        except Exception:
+            pass
+    if recovered_wal > 0 or fixed_steps > 0:
+        print(f"[+] Cuu ho crash: Da checkpoint {recovered_wal} file WAL do dang, sua {fixed_steps} buoc bi ket Running.")
+
 def scan_all_conversations():
     user_home = Path(os.path.expanduser("~"))
     convos_dir = user_home / ".gemini" / "antigravity-ide" / "conversations"
@@ -37,6 +69,9 @@ def scan_all_conversations():
     items = []
     if not convos_dir.exists():
         return items
+
+    # Cuu ho cac phien bi crash truoc khi scan
+    recover_crashed_conversations(convos_dir)
 
     db_files = sorted(convos_dir.glob("*.db"), key=os.path.getmtime, reverse=True)
     for db_path in db_files:
@@ -98,9 +133,23 @@ def scan_all_conversations():
         items.append([cid, [workspace_uri], mtime_ms, title])
     return items
 
-def apply_test_patch():
+def find_workbench_js():
     local_app_data = Path(os.environ.get("LOCALAPPDATA", r"C:\Users\Traistorm\AppData\Local"))
-    wb_path = local_app_data / "Programs" / "Antigravity IDE" / "resources" / "app" / "out" / "vs" / "workbench" / "workbench.desktop.main.js"
+    candidates = [
+        local_app_data / "Programs" / "Antigravity IDE" / "resources" / "app" / "out" / "vs" / "workbench" / "workbench.desktop.main.js",
+        local_app_data / "Programs" / "antigravity" / "resources" / "app" / "out" / "vs" / "workbench" / "workbench.desktop.main.js",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+def apply_test_patch():
+    wb_path = find_workbench_js()
+    if not wb_path.exists():
+        print(f"[-] Khong tim thay file workbench JS tai: {wb_path}")
+        return False
+
     backup_path = wb_path.with_name(wb_path.name + ".backup")
 
     if not backup_path.exists():

@@ -92,9 +92,51 @@ def clean_title(raw_text):
         title = title[:62] + "..."
     return title
 
-def sync_conversations():
+def find_vscdb_path():
     app_data = Path(os.environ.get("APPDATA", r"C:\Users\Traistorm\AppData\Roaming"))
-    vscdb_path = app_data / "Antigravity IDE" / "User" / "globalStorage" / "state.vscdb"
+    candidates = [
+        app_data / "Antigravity IDE" / "User" / "globalStorage" / "state.vscdb",
+        app_data / "Antigravity" / "User" / "globalStorage" / "state.vscdb",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+def recover_crashed_conversations(convos_dir):
+    """
+    Quét và tự động cứu hộ các database bị crash hoặc ngắt đột ngột:
+    - Thu dọn và merge các file SQLite WAL (.db-wal) dở dang về file chính.
+    - Phát hiện và chuyển trạng thái các bước bị treo status=2 (RUNNING) về status=3 (DONE).
+    """
+    db_files = list(convos_dir.glob("*.db"))
+    recovered_wal = 0
+    fixed_steps = 0
+    for db_path in db_files:
+        wal_path = db_path.with_name(db_path.name + "-wal")
+        has_wal = wal_path.exists()
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            if has_wal:
+                cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                recovered_wal += 1
+            # Check for stuck steps
+            cur.execute("SELECT COUNT(*) FROM steps WHERE status=2")
+            stuck_count = cur.fetchone()[0] or 0
+            if stuck_count > 0:
+                cur.execute("UPDATE steps SET status=3 WHERE status=2")
+                conn.commit()
+                cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                fixed_steps += stuck_count
+            conn.close()
+        except Exception:
+            pass
+    if recovered_wal > 0 or fixed_steps > 0:
+        print(f"[+] Cuu ho crash: Da checkpoint {recovered_wal} file WAL do dang, sua {fixed_steps} buoc bi ket Running.")
+
+def sync_conversations():
+    vscdb_path = find_vscdb_path()
     if not vscdb_path.exists():
         print(f"[-] Khong tim thay database state: {vscdb_path}")
         return False
@@ -106,6 +148,9 @@ def sync_conversations():
     if not convos_dir.exists():
         print(f"[-] Khong tim thay thu muc conversations: {convos_dir}")
         return False
+
+    # 0. Cuu ho cac database bi crash / stuck WAL truoc khi sync
+    recover_crashed_conversations(convos_dir)
 
     # Backup state.vscdb
     backup_path = vscdb_path.with_name("state.vscdb.antigravity_backup")

@@ -7,11 +7,11 @@ echo.
 
 cd /d "%~dp0"
 
-echo [1/2] Dang va UI (Bo gioi han thu gon 'Show more')...
+echo [1/2] Dang va UI & Cuu ho phien chat bi crash (WAL / Running)...
 python patch_ui.py
 echo.
 
-echo [2/2] Dang quet va phuc hoi cac cuoc hoi thoai...
+echo [2/2] Dang quet & dong bo muc luc cac cuoc hoi thoai...
 python sync_conversations.py
 echo.
 
