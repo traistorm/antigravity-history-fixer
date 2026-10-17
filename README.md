@@ -55,6 +55,8 @@ Nhấp đúp vào:
 run_restore.bat
 ```
 
+> **v2:** IDE đọc `out/agy_convos.json` (poll 20 giây) nên hội thoại mới tự hiện, không cần vá lại. `sync_conversations.py` chỉ ghi manifest; ghi `state.vscdb` là tùy chọn (`--write-state`). Cứu hộ crash chỉ chạm các phiên đã im lặng > 10 phút. Nếu IDE cập nhật mà bản vá không khớp, `patch_ui.py` báo lỗi và không ghi gì.
+
 ---
 
 ## 📁 Cấu Trúc Thư Mục
